@@ -141,7 +141,7 @@ class SGH(BaseEnsemble):
     """
     def __init__(self):
 
-        super(SGH, self).__init__(base_estimator=SGDClassifier,
+        super(SGH, self).__init__(estimator=SGDClassifier,
                                   n_estimators=1)
 
         # Pool initially empty
@@ -174,7 +174,7 @@ class SGH(BaseEnsemble):
     def _fit(self, X, y, included_samples):
 
         # Set base estimator as the Perceptron
-        self.base_estimator_ = SGDClassifier(loss="perceptron",
+        self.estimator_ = SGDClassifier(loss="perceptron",
                                              eta0=1.e-17,
                                              max_iter=1,
                                              learning_rate="constant",

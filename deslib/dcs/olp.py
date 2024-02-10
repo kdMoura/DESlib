@@ -87,7 +87,8 @@ class OLP(BaseDS):
 
         # Label encoder
         self.base_already_encoded_ = False
-        y_ind = self._setup_label_encoder(y)
+        self._setup_label_encoder(y)
+        y_ind = self._encode_base_labels(y)
 
         self._set_dsel(X, y_ind)
 
@@ -99,9 +100,11 @@ class OLP(BaseDS):
             self.knne_ = False
         else:
             self.knne_ = True
+            #self.knne_ = False
 
-        self._set_region_of_competence_algorithm()
-        self._fit_region_competence(X, y_ind, self.k)
+        # Set self.knn_class_ 
+        self._set_region_of_competence_algorithm() 
+        self._fit_region_competence(X, y_ind) # self.k is already set in set_region_of_competence self._fit_region_competence(X, y_ind, self.k)
 
         # Calculate the KDN score of the training samples
         self.hardness_, _ = kdn_score(X, y_ind, self.k)
@@ -187,11 +190,19 @@ class OLP(BaseDS):
             if self.knne_:
                 idx_neighb = np.array([], dtype=int)
 
-                # Obtain neighbors of each class individually
-                for j in np.arange(0, self.n_classes_):
+                #Obtain neighbors of each class individually
+                # for j in np.arange(0, self.n_classes_):
+                #     # Obtain neighbors from the classes in the RoC
+                #     if np.any(self.classes_[j] == self.DSEL_target_[self.neighbors[0][np.arange(0, curr_k)]]):
+                #         nc = np.where(self.classes_[j] == self.DSEL_target_[self.neighbors[0]])
+                #         idx_nc = self.neighbors[0][nc]
+                #         idx_nc = idx_nc[np.arange(0, np.minimum(curr_k, len(idx_nc)))]
+                #         idx_neighb = np.concatenate((idx_neighb, idx_nc), axis=0)
+                
+                for enc_class in self.enc_.transform(self.classes_):
                     # Obtain neighbors from the classes in the RoC
-                    if np.any(self.classes_[j] == self.DSEL_target_[self.neighbors[0][np.arange(0, curr_k)]]):
-                        nc = np.where(self.classes_[j] == self.DSEL_target_[self.neighbors[0]])
+                    if np.any(enc_class == self.DSEL_target_[self.neighbors[0][np.arange(0, curr_k)]]):
+                        nc = np.where(enc_class == self.DSEL_target_[self.neighbors[0]])
                         idx_nc = self.neighbors[0][nc]
                         idx_nc = idx_nc[np.arange(0, np.minimum(curr_k, len(idx_nc)))]
                         idx_neighb = np.concatenate((idx_neighb, idx_nc), axis=0)
@@ -295,11 +306,11 @@ class OLP(BaseDS):
         # Predict query label
         if len(self.pool_classifiers) > 0:
             votes = self.select(query)
-            predicted_label = mode(votes)[0]
+            predicted_label = mode(votes, keepdims=False)[0]
         else:
             nn = np.arange(0, self.k)
             roc = self.neighbors[0][nn]
-            predicted_label = mode(self.DSEL_target_[roc])[0]
+            predicted_label = mode(self.DSEL_target_[roc], keepdims=False)[0]
 
         return predicted_label
 
@@ -370,7 +381,7 @@ class OLP(BaseDS):
             # If all of its neighbors in the RoC have Instance hardness (IH) below or equal to IH_rate, use KNN
             if np.all(self.hardness_[np.asarray(roc)] <= self.IH_rate):
                 y_neighbors = self.DSEL_target_[roc]
-                predicted_labels[index], _ = mode(y_neighbors)
+                predicted_labels[index], _ = mode(y_neighbors, keepdims=False)
 
             # Otherwise, generate the local pool for the query instance and use
             # DS for classification
