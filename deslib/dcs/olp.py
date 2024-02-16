@@ -97,17 +97,19 @@ class OLP(BaseDS):
 
         # Set knne
         if self.n_classes_ > 2:
+            #False
             self.knne_ = False
         else:
-            self.knne_ = True
+            #True
+            self.knne_ = True  
             #self.knne_ = False
 
         # Set self.knn_class_ 
-        self._set_region_of_competence_algorithm() 
-        self._fit_region_competence(X, y_ind) # self.k is already set in set_region_of_competence self._fit_region_competence(X, y_ind, self.k)
+        self._set_region_of_competence_algorithm() #set KNN or FAISS or an estimator passed as parameter
+        self._fit_region_competence(X, y_ind) # self.k is already set in set_region_of_competence self._fit_region_competence(X, y_ind, self.k) #train the KNN or FAISS or estimator using training data
 
         # Calculate the KDN score of the training samples
-        self.hardness_, _ = kdn_score(X, y_ind, self.k)
+        self.hardness_, _ = kdn_score(X, y_ind, self.k) #array same size as y
 
         return self
 
@@ -424,7 +426,7 @@ class OLP(BaseDS):
             self.distances, self.neighbors = self._get_region_competence(instance, k=tmp_k)
 
             nn = np.arange(0, self.k)
-            roc = self.neighbors[0][nn]
+            roc = self.neighbors[0][nn] #-> index is 0 because it is regards only one instance per time
 
             # If all of its neighbors in the RoC have Instance hardness (IH) below or equal to IH_rate, use KNN
             if np.all(self.hardness_[np.asarray(roc)] <= self.IH_rate):
