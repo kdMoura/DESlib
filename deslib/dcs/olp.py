@@ -203,10 +203,10 @@ class OLP(BaseDS):
                 
                 for enc_class in self.enc_.transform(self.classes_):
                     # Obtain neighbors from the classes in the RoC
-                    if np.any(enc_class == self.DSEL_target_[self.neighbors[0][np.arange(0, curr_k)]]):
-                        nc = np.where(enc_class == self.DSEL_target_[self.neighbors[0]])
-                        idx_nc = self.neighbors[0][nc]
-                        idx_nc = idx_nc[np.arange(0, np.minimum(curr_k, len(idx_nc)))]
+                    if np.any(enc_class == self.DSEL_target_[self.neighbors[0][np.arange(0, curr_k)]]): #the 0 in self.neighbors[0] is just to inside like when using np.where. From the closest curr_k sample, is there any with enc_class?
+                        nc = np.where(enc_class == self.DSEL_target_[self.neighbors[0]]) #obs: DSEL_target indexes is different from self.DSEL_target_[self.neighbors[0]]
+                        idx_nc = self.neighbors[0][nc] #Gets the closest neighbors to the sample that have enc_class label
+                        idx_nc = idx_nc[np.arange(0, np.minimum(curr_k, len(idx_nc)))] # get only curr_k or less
                         idx_neighb = np.concatenate((idx_neighb, idx_nc), axis=0)
 
             else:
@@ -223,7 +223,7 @@ class OLP(BaseDS):
                 subpool.fit(self.DSEL_data_, self.DSEL_target_, included_samples)
 
                 # Adjust chosen DCS technique parameters
-                if self.ds_tech == 'ola':
+                if self.ds_tech == 'ola': #TODO: investigate if should use self.k because in case of KNNE when k =3 and dataset has 2 classes, len(idx_neighb) is equal to 6
                     ds = OLA(subpool, k=len(idx_neighb))  # change for self.k
                 elif self.ds_tech == 'lca':
                     ds = LCA(subpool, k=len(idx_neighb))
@@ -423,7 +423,7 @@ class OLP(BaseDS):
             # Proceeds with DS, calculates the region of competence of the
             # query sample
             tmp_k = np.minimum(self.n_samples_, self.n_classes_ * self.n_classifiers * self.k)
-            self.distances, self.neighbors = self._get_region_competence(instance, k=tmp_k)
+            self.distances, self.neighbors = self._get_region_competence(instance, k=tmp_k) #get the distances of the query to all samples or to ncls * nclassifiers * k samples
 
             nn = np.arange(0, self.k)
             roc = self.neighbors[0][nn] #-> index is 0 because it is regards only one instance per time
