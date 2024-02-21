@@ -57,13 +57,14 @@ class OLP(BaseDS):
 
     """
 
-    def __init__(self, n_classifiers=7, k=7, IH_rate=0.0, ds_tech='ola'):
+    def __init__(self, n_classifiers=7, k=7, IH_rate=0.0, ds_tech='ola', knne=False):
 
         super(OLP, self).__init__([], k, IH_rate=IH_rate)
 
         self.name = 'Online Local Pool (OLP)'
         self.ds_tech = ds_tech
         self.n_classifiers = n_classifiers
+        self.knne = knne
 
     def fit(self, X, y):
         """
@@ -94,15 +95,6 @@ class OLP(BaseDS):
 
         if self.k > self.n_samples_:
             self.k = self.n_samples_ - 1
-
-        # Set knne
-        if self.n_classes_ > 2:
-            #False
-            self.knne_ = False
-        else:
-            #True
-            self.knne_ = True  
-            #self.knne_ = False
 
         # Set self.knn_class_ 
         self._set_region_of_competence_algorithm() #set KNN or FAISS or an estimator passed as parameter
@@ -189,7 +181,7 @@ class OLP(BaseDS):
 
             included_samples = np.zeros(n_samples, dtype=int)
 
-            if self.knne_:
+            if self.knne:
                 idx_neighb = np.array([], dtype=int)
 
                 #Obtain neighbors of each class individually
@@ -442,3 +434,102 @@ class OLP(BaseDS):
             self.distances = None
 
         return predicted_probas
+    
+    def _predictv(self, X, predict_proba=True):
+        """
+        Predicts the class label for each sample in X.
+    
+        Parameters
+        ----------
+        X : array of shape = [n_samples, n_features]
+            The input data.
+    
+        Returns
+        -------
+        predicted_labels : array of shape = [n_samples]
+                           Predicted class label for each sample in X.
+        """
+        # Check if the DS model was trained
+        check_is_fitted(self, ["DSEL_data_", "DSEL_target_", "hardness_"])
+        # Check if X is a valid input
+        X = check_array(X)
+    
+        # Get the region of competence for all instances in X
+        tmp_k = np.minimum(self.n_samples_, self.n_classes_ * self.n_classifiers * self.k)
+        distances, neighbors = self._get_region_competence(X, k=tmp_k) #TODO: pass as parameters
+    
+        # Extract the nearest neighbors for each instance
+        nn = np.arange(0, self.k)
+        roc = neighbors[:, nn]
+    
+        # Find instances with all neighbors having Instance Hardness (IH) below or equal to IH_rate
+        ih_threshold_met = np.all(self.hardness_[roc] <= self.IH_rate, axis=1)
+        
+        
+        # Create result arrays
+        if predict_proba:
+            knn_predictions = np.zeros((X.shape[0], self.n_classes_), dtype=float)
+            final_predictions = np.empty((X.shape[0], self.n_classes_), dtype=float)
+        else:
+            knn_predictions = np.zeros(X.shape[0], dtype=int)
+            final_predictions = np.empty(X.shape[0], dtype=int)
+        
+        # Use KNN for instances meeting the IH threshold
+        knn_indices = np.where(ih_threshold_met)[0]
+        if knn_indices.size:
+            if predict_proba:
+                knn_predictions[knn_indices] = self.roc_algorithm_.predict_proba(X[knn_indices])
+            else:
+                knn_predictions[knn_indices] = self.roc_algorithm_.predict(X[knn_indices])
+
+    
+        # Use DS for instances not meeting the IH threshold
+        ds_indices = np.where(~ih_threshold_met)[0]
+        ds_predictions = []
+        for idx in ds_indices:
+            self.distances = np.atleast_2d(distances[idx])
+            self.neighbors = np.atleast_2d(neighbors[idx])
+            if predict_proba:
+                l = self.predict_proba_with_ds(np.atleast_2d(X[idx]))
+            else:
+                l = self.classify_with_ds(np.atleast_2d(X[idx]))
+            ds_predictions.append(l)
+    
+        
+       
+        final_predictions[knn_indices] = knn_predictions[knn_indices]
+        final_predictions[ds_indices] =  ds_predictions
+
+        return final_predictions if predict_proba else self.classes_.take(final_predictions)
+
+    def predictv(self, X):
+       """
+       Predicts the class label for each sample in X.
+   
+       Parameters
+       ----------
+       X : array of shape = [n_samples, n_features]
+           The input data.
+   
+       Returns
+       -------
+       predicted_labels : array of shape = [n_samples]
+                          Predicted class label for each sample in X.
+       """
+       return self._predictv(X, predict_proba=False)
+   
+    def predict_probav(self, X):
+        """
+        Predicts the class label for each sample in X.
+    
+        Parameters
+        ----------
+        X : array of shape = [n_samples, n_features]
+            The input data.
+    
+        Returns
+        -------
+        predicted_labels : array of shape = [n_samples]
+                           Predicted class label for each sample in X.
+        """
+        return self._predictv(X)
