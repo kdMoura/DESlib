@@ -23,6 +23,8 @@ from deslib.dcs.mla import MLA
 from deslib.util.instance_hardness import kdn_score
 
 
+
+
 class OLP(BaseDS):
     """
     Online Local Pool (OLP).
@@ -64,7 +66,7 @@ class OLP(BaseDS):
         self.name = 'Online Local Pool (OLP)'
         self.ds_tech = ds_tech
         self.n_classifiers = n_classifiers
-        self.knne = knne
+        self.knne_ = knne
 
     def fit(self, X, y):
         """
@@ -181,7 +183,7 @@ class OLP(BaseDS):
 
             included_samples = np.zeros(n_samples, dtype=int)
 
-            if self.knne:
+            if self.knne_:
                 idx_neighb = np.array([], dtype=int)
 
                 #Obtain neighbors of each class individually
@@ -339,103 +341,13 @@ class OLP(BaseDS):
                 probs[idx] = np.sum(votes == idx) / self.k
 
         return probs
-
-    def predict(self, X):
-        """
-        Predicts the class label for each sample in X.
-
-        Parameters
-        ----------
-        X : array of shape = [n_samples, n_features]
-            The input data.
-
-        Returns
-        -------
-        predicted_labels : array of shape = [n_samples]
-                           Predicted class label for each sample in X.
-        """
-        # Check if the DS model was trained
-        check_is_fitted(self, ["DSEL_data_", "DSEL_target_", "hardness_"])
-        # Check if X is a valid input
-        X = check_array(X)
-
-        n_samples = X.shape[0]
-        predicted_labels = np.zeros(n_samples).astype(int)
-        for index, instance in enumerate(X):
-
-            instance = instance.reshape(1, -1)
-
-            # proceeds with DS, calculates the region of competence of the query sample
-            tmp_k = np.minimum(self.n_samples_, self.n_classes_ * self.n_classifiers * self.k)
-            self.distances, self.neighbors = self._get_region_competence(instance, k=tmp_k)
-
-            nn = np.arange(0, self.k)
-            roc = self.neighbors[0][nn]
-
-            # If all of its neighbors in the RoC have Instance hardness (IH) below or equal to IH_rate, use KNN
-            if np.all(self.hardness_[np.asarray(roc)] <= self.IH_rate):
-                y_neighbors = self.DSEL_target_[roc]
-                predicted_labels[index], _ = mode(y_neighbors, keepdims=False)
-
-            # Otherwise, generate the local pool for the query instance and use
-            # DS for classification
-            else:
-                predicted_labels[index] = self.classify_with_ds(instance)
-
-            self.neighbors = None
-            self.distances = None
-
-        return self.classes_.take(predicted_labels)
-
-    def predict_proba(self, X):
-        """
-        Predicts the class label for each sample in X.
-
-        Parameters
-        ----------
-        X : array of shape = [n_samples, n_features]
-            The input data.
-
-        Returns
-        -------
-        predicted_labels : array of shape = [n_samples]
-                           Predicted class label for each sample in X.
-        """
-        # Check if the DS model was trained
-        check_is_fitted(self, ["DSEL_data_", "DSEL_target_", "hardness_"])
-        # Check if X is a valid input
-        X = check_array(X)
-
-        n_samples = X.shape[0]
-        predicted_probas = np.zeros((n_samples, self.n_classes_), dtype=float)
-        for index, instance in enumerate(X):
-
-            instance = instance.reshape(1, -1)
-
-            # Proceeds with DS, calculates the region of competence of the
-            # query sample
-            tmp_k = np.minimum(self.n_samples_, self.n_classes_ * self.n_classifiers * self.k)
-            self.distances, self.neighbors = self._get_region_competence(instance, k=tmp_k) #get the distances of the query to all samples or to ncls * nclassifiers * k samples
-
-            nn = np.arange(0, self.k)
-            roc = self.neighbors[0][nn] #-> index is 0 because it is regards only one instance per time
-
-            # If all of its neighbors in the RoC have Instance hardness (IH) below or equal to IH_rate, use KNN
-            if np.all(self.hardness_[np.asarray(roc)] <= self.IH_rate):
-                y_neighbors = self.DSEL_target_[roc]
-                for idx in range(self.n_classes_):
-                    predicted_probas[index, idx] = np.sum(y_neighbors == idx) / self.k
-
-            # Otherwise, generate the local pool for the query instance and use DS for classification
-            else:
-                predicted_probas[index, :] = self.predict_proba_with_ds(instance)
-
-            self.neighbors = None
-            self.distances = None
-
-        return predicted_probas
     
-    def _predictv(self, X, predict_proba=True):
+    def _predict(self, 
+                  X, 
+                  knn_predictions, 
+                  final_predictions, 
+                  fn_predict, 
+                  fn_ds_predict):
         """
         Predicts the class label for each sample in X.
     
@@ -451,8 +363,7 @@ class OLP(BaseDS):
         """
         # Check if the DS model was trained
         check_is_fitted(self, ["DSEL_data_", "DSEL_target_", "hardness_"])
-        # Check if X is a valid input
-        X = check_array(X)
+        
     
         # Get the region of competence for all instances in X
         tmp_k = np.minimum(self.n_samples_, self.n_classes_ * self.n_classifiers * self.k)
@@ -465,23 +376,10 @@ class OLP(BaseDS):
         # Find instances with all neighbors having Instance Hardness (IH) below or equal to IH_rate
         ih_threshold_met = np.all(self.hardness_[roc] <= self.IH_rate, axis=1)
         
-        
-        # Create result arrays
-        if predict_proba:
-            knn_predictions = np.zeros((X.shape[0], self.n_classes_), dtype=float)
-            final_predictions = np.empty((X.shape[0], self.n_classes_), dtype=float)
-        else:
-            knn_predictions = np.zeros(X.shape[0], dtype=int)
-            final_predictions = np.empty(X.shape[0], dtype=int)
-        
         # Use KNN for instances meeting the IH threshold
         knn_indices = np.where(ih_threshold_met)[0]
         if knn_indices.size:
-            if predict_proba:
-                knn_predictions[knn_indices] = self.roc_algorithm_.predict_proba(X[knn_indices])
-            else:
-                knn_predictions[knn_indices] = self.roc_algorithm_.predict(X[knn_indices])
-
+            knn_predictions[knn_indices] = fn_predict(X[knn_indices])
     
         # Use DS for instances not meeting the IH threshold
         ds_indices = np.where(~ih_threshold_met)[0]
@@ -489,20 +387,19 @@ class OLP(BaseDS):
         for idx in ds_indices:
             self.distances = np.atleast_2d(distances[idx])
             self.neighbors = np.atleast_2d(neighbors[idx])
-            if predict_proba:
-                l = self.predict_proba_with_ds(np.atleast_2d(X[idx]))
-            else:
-                l = self.classify_with_ds(np.atleast_2d(X[idx]))
+            l = fn_ds_predict(np.atleast_2d(X[idx]))
             ds_predictions.append(l)
     
-        
-       
         final_predictions[knn_indices] = knn_predictions[knn_indices]
         final_predictions[ds_indices] =  ds_predictions
+        
+        self.neighbors = None
+        self.distances = None
+        
+        return final_predictions 
+    
 
-        return final_predictions if predict_proba else self.classes_.take(final_predictions)
-
-    def predictv(self, X):
+    def predict(self, X):
        """
        Predicts the class label for each sample in X.
    
@@ -516,9 +413,23 @@ class OLP(BaseDS):
        predicted_labels : array of shape = [n_samples]
                           Predicted class label for each sample in X.
        """
-       return self._predictv(X, predict_proba=False)
+       # Check if X is a valid input
+       X = check_array(X)
+       knn_predictions = np.zeros(X.shape[0], dtype=int)
+       final_predictions = np.empty(X.shape[0], dtype=int)
+       fn_predict = self.roc_algorithm_.predict
+       fn_ds_predict = self.classify_with_ds
+       
+       predictions = self._predict(X, 
+                             knn_predictions, 
+                             final_predictions, 
+                             fn_predict, 
+                             fn_ds_predict)
+       
+       
+       return self.classes_.take(predictions)
    
-    def predict_probav(self, X):
+    def predict_proba(self, X):
         """
         Predicts the class label for each sample in X.
     
@@ -532,4 +443,15 @@ class OLP(BaseDS):
         predicted_labels : array of shape = [n_samples]
                            Predicted class label for each sample in X.
         """
-        return self._predictv(X)
+        # Check if X is a valid input
+        X = check_array(X)
+        knn_predictions = np.zeros((X.shape[0], self.n_classes_), dtype=float)
+        final_predictions = np.empty((X.shape[0], self.n_classes_), dtype=float)
+        fn_predict = self.roc_algorithm_.predict_proba
+        fn_ds_predict = self.predict_proba_with_ds
+        
+        return self._predict(X, 
+                              knn_predictions, 
+                              final_predictions, 
+                              fn_predict, 
+                              fn_ds_predict)
