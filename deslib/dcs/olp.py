@@ -12,7 +12,7 @@ from scipy.stats import mode
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
 
-from deslib.util.sgh import SGH
+from deslib.util.sgh import SGH, SGH2
 from deslib.base import BaseDS
 from deslib.dcs.ola import OLA
 from deslib.dcs.lca import LCA
@@ -59,7 +59,7 @@ class OLP(BaseDS):
 
     """
 
-    def __init__(self, n_classifiers=7, k=7, IH_rate=0.0, ds_tech='ola', knne=False):
+    def __init__(self, n_classifiers=7, k=7, IH_rate=0.0, ds_tech='ola', knne=False, sgh = SGH):
 
         super(OLP, self).__init__([], k, IH_rate=IH_rate)
 
@@ -67,6 +67,7 @@ class OLP(BaseDS):
         self.ds_tech = ds_tech
         self.n_classifiers = n_classifiers
         self.knne_ = knne
+        self.sgh = sgh
 
     def fit(self, X, y):
         """
@@ -179,7 +180,7 @@ class OLP(BaseDS):
                n_err < max_err and
                curr_k <= self.n_samples_):
 
-            subpool = SGH()
+            subpool = self.sgh()
 
             included_samples = np.zeros(n_samples, dtype=int)
 

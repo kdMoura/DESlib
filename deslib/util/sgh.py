@@ -13,6 +13,10 @@ from scipy.spatial.distance import squareform
 from sklearn.utils.validation import check_X_y
 from math import sqrt
 
+from sklearn.svm import SVC
+
+#SVC(C=1, gamma=2**-11)
+
 
 def _build_Perceptron(X, y, curr_training_samples, centroids):
     """
@@ -102,7 +106,7 @@ def _build_Perceptron(X, y, curr_training_samples, centroids):
         w_p = 0.01 * np.ones(n_features, dtype=float)
         w_p = w_p / sqrt((w_p ** 2).sum())
         raise Warning('Equal classes centroids!')
-
+        #print('Equal classes centroids!')
     else:
         # Normal vector of diff_vec
         w_p = diff_vec / sqrt((diff_vec ** 2).sum())
@@ -278,3 +282,161 @@ class SGH(BaseEnsemble):
         return self
 
     # TODO: implement hit rate function
+
+class SGH2(BaseEnsemble):
+    """
+    Self-Generating Hyperplanes (SGH).
+
+    Generates a pool of classifiers which guarantees an Oracle accuracy rate of 100% over the training (input) set.
+    That is, for each instance in the training set, there is at least one classifier in the pool able to correctly
+    label it. The generated classifiers are always two-class hyperplanes.
+
+    References
+    ----------
+    L. I. Kuncheva, A theoretical study on six classifier fusion strategies, IEEE Transactions on
+    Pattern Analysis and Machine Intelligence 24 (2) (2002) 281-286.
+
+    M. A. Souza, G. D. Cavalcanti, R. M. Cruz, R. Sabourin, On the characterization of the
+    oracle for dynamic classifier selection, in: International Joint Conference on Neural Networks,
+    IEEE, 2017, pp. 332-339.
+
+    """
+    def __init__(self):
+
+        super(SGH2, self).__init__(estimator=SVC,
+                                  n_estimators=1)
+
+        # Pool initially empty
+        self.estimators_ = []
+
+    def fit(self, X, y, included_samples=np.array([])):
+        """
+        Populates the SHG ensemble.
+
+        Parameters
+        ----------
+        X : array of shape = [n_samples, n_features]
+            The training data.
+
+        y : array of shape = [n_samples]
+            class labels of each example in X.
+
+        included_samples : array of shape = [n_samples]
+            array of ones and zeros ('1','0'), indicating which samples in X are to be used for training.
+            If all, leave blank.
+
+
+        Returns
+        -------
+        self
+        """
+        check_X_y(X, y)
+        return self._fit(X, y, included_samples)
+
+    def _fit(self, X, y, included_samples):
+
+        # Set base estimator as the Perceptron
+        # self.estimator_ = SGDClassifier(loss="perceptron",
+        #                                      eta0=1.e-17,
+        #                                      max_iter=1,
+        #                                      learning_rate="constant",
+        #                                      penalty=None)
+        
+        self.estimator_ = SVC()#C=1, gamma=2**-11)
+
+        # If there is no indication of which instances to include in the training, include all
+        if included_samples.sum() == 0:
+            included_samples = np.ones((X.shape[0]), int)
+
+        # Generate pool
+        self._generate_pool(X, y, included_samples)
+
+        return self
+
+    def _generate_pool(self, X, y, curr_training_samples):
+        """
+        Generates the classifiers in the pool of classifiers ("estimators_") using the SGH method.
+
+        In each iteration of the method, a hyperplane is placed in the midpoint between the centroids
+        of the two most distant classes in the training data. Then, the newly generated classifier is
+        tested over all samples and the ones it correctly labels are removed from the set. In the following
+        iteration, a new hyperplane is created based on the classes of the remaining samples in the training set.
+        The method stops when no sample remains in the training set.
+
+        Parameters
+        ----------
+        X : array of shape = [n_samples, n_features]
+            The training data.
+
+        y : array of shape = [n_samples]
+            class labels of each example in X.
+
+        curr_training_samples : array of shape = [n_samples]
+            array of ones and zeros ('1','0'), indicating which samples in X are to be used for training.
+            If all, leave blank.
+
+        Returns
+        -------
+        self
+        """
+        n_samples, n_features = X.shape
+
+        # Labels of the correct classifier for each training sample
+        corr_classif_lab = np.zeros(n_samples, dtype=int)
+
+        # Pool size
+        n_perceptrons = 0
+        n_err = 0
+        max_err = 50
+
+        # Problem's classes
+        classes = np.unique(y)
+        n_classes = classes.size
+
+        # Centroids of each class
+        centroids = np.zeros((n_classes, n_features), float)
+        
+        idx_curr_training_samples = np.where(curr_training_samples > 0)
+        n_unique_classes = len(np.unique(y[idx_curr_training_samples[0]]))
+
+        # While there are still misclassified samples
+        while curr_training_samples.sum() > 0 and n_err < max_err and n_unique_classes > 1:
+
+    
+
+            # Obtain set with instances that weren't correctly classified yet
+            idx_curr_training_samples = np.where(curr_training_samples > 0)
+            eval_X = X[idx_curr_training_samples[0]]
+            eval_y = y[idx_curr_training_samples[0]]
+            
+            #model = SVC(C=1, gamma=2**-11)
+            model = SVC() #C=1.0, kernel='rbf', gamma='scale'
+            model.fit(eval_X, eval_y)
+            
+            self.estimators_.append(model)
+
+            # Evaluate generated classifier over eval_X
+            out_curr_perc = self.estimators_[n_perceptrons].predict(eval_X)
+
+            # Identify correctly classified samples
+            idx_correct_eval = (out_curr_perc == eval_y).nonzero()
+
+            # Exclude correctly classified samples from current training set
+            curr_training_samples[idx_curr_training_samples[0][idx_correct_eval[0]]] = 0
+
+            # Set classifier label for the correctly classified instances
+            corr_classif_lab[idx_curr_training_samples[0][idx_correct_eval[0]]] = n_perceptrons
+            # Increase pool size
+            n_perceptrons += 1
+            n_err += 1
+            
+            idx_curr_training_samples = np.where(curr_training_samples > 0)
+            n_unique_classes = len(np.unique(y[idx_curr_training_samples[0]]))
+            #print(np.unique(y[idx_curr_training_samples[0]], return_counts=True))
+
+        # Update pool size
+        self.n_estimators_ = n_perceptrons
+        # Update classifier labels
+        self.correct_classif_label_ = corr_classif_lab
+
+        return self
